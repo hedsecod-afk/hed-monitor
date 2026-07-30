@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import './index.css'
 
 // ── Odisha HED house palette ──────────────────────────────────────────────
 const C = {
