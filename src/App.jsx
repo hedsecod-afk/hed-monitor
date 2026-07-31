@@ -54,7 +54,16 @@ export default function App() {
   const [role, setRole] = useState("secretary");
   const [officerSection, setOfficerSection] = useState("");
   const [targets, setTargets] = useState([]);
-  const [sections, setSections] = useState(DEFAULT_SECTIONS);
+  // const [sections, setSections] = useState(DEFAULT_SECTIONS);
+  let sections = [
+  "Establishment",
+  "Budget & Finance",
+  "SAMS / Admissions",
+  "University Section",
+  "Legislation",
+  "NSS Cell",
+  "Scheme Implementation",
+];
   const [loading, setLoading] = useState(true);
   const [saveNote, setSaveNote] = useState("");
 
@@ -82,11 +91,11 @@ export default function App() {
         setTargets(Array.isArray(targetsData) ? targetsData : []);
         
         // Map section objects from DB [{id: 1, name: "Est..."}, ...] to flat array of strings
-        if (Array.isArray(sectionsData) && sectionsData.length > 0) {
-          setSections(sectionsData.map(s => s.name));
-        } else {
-          setSections(DEFAULT_SECTIONS);
-        }
+        // if (Array.isArray(sectionsData) && sectionsData.length > 0) {
+        //   setSections(sectionsData.map(s => s.name));
+        // } else {
+        //   setSections(DEFAULT_SECTIONS);
+        // }
       } catch (error) {
         console.error("Failed to load data:", error);
         flashSave(false);
@@ -160,7 +169,7 @@ export default function App() {
         body: JSON.stringify({ name }),
       });
       if (res.ok) {
-        setSections((prev) => [...prev, name]);
+        // setSections((prev) => [...prev, name]);
         flashSave(true);
       } else throw new Error("Failed to add section");
     } catch (e) {
