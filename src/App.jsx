@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import './index.css'
 
+const API_BASE = "http://localhost:3000/api";
+
 // ── Odisha HED house palette ──────────────────────────────────────────────
 const C = {
   navy: "#0D2B55",
@@ -38,40 +40,18 @@ const DEFAULT_SECTIONS = [
   "Scheme Implementation",
 ];
 
-const TARGETS_KEY = "hed-monitor-targets-v1";
-const SECTIONS_KEY = "hed-monitor-sections-v1";
-
 const todayISO = () => new Date().toISOString().slice(0, 10);
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 function isOverdue(t) {
   return t.status !== "Completed" && t.deadline && t.deadline < todayISO();
 }
+
 function effectiveStatus(t) {
   return isOverdue(t) ? "Overdue" : t.status;
 }
 
-// ── Storage helpers (shared, persists across sessions & users) ────────────
-async function loadShared(key, fallback) {
-  try {
-    const r = await window.storage.get(key, true);
-    if (r && r.value) return JSON.parse(r.value);
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-async function saveShared(key, value) {
-  try {
-    await window.storage.set(key, JSON.stringify(value), true);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default function App() {
-  const [role, setRole] = useState("secretary"); // "secretary" | "officer"
+  const [role, setRole] = useState("secretary");
   const [officerSection, setOfficerSection] = useState("");
   const [targets, setTargets] = useState([]);
   const [sections, setSections] = useState(DEFAULT_SECTIONS);
@@ -82,55 +62,113 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [showAdd, setShowAdd] = useState(false);
 
-  // Load once
-  useEffect(() => {
-    (async () => {
-      const [t, s] = await Promise.all([
-        loadShared(TARGETS_KEY, []),
-        loadShared(SECTIONS_KEY, DEFAULT_SECTIONS),
-      ]);
-      setTargets(Array.isArray(t) ? t : []);
-      setSections(Array.isArray(s) && s.length ? s : DEFAULT_SECTIONS);
-      setLoading(false);
-    })();
-  }, []);
-
   const flashSave = useCallback((ok) => {
     setSaveNote(ok ? "Saved" : "Save failed — check connection");
     setTimeout(() => setSaveNote(""), 1800);
   }, []);
 
-  // Reload-then-write to reduce clobbering when multiple users edit
-  const persistTargets = useCallback(async (mutator) => {
-    const fresh = await loadShared(TARGETS_KEY, targets);
-    const next = mutator(Array.isArray(fresh) ? fresh : targets);
-    setTargets(next);
-    const ok = await saveShared(TARGETS_KEY, next);
-    flashSave(ok);
-  }, [targets, flashSave]);
+  // ── Database Fetching ───────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const [targetsRes, sectionsRes] = await Promise.all([
+          fetch(`${API_BASE}/targets`),
+          fetch(`${API_BASE}/sections`),
+        ]);
+        
+        const targetsData = await targetsRes.json();
+        const sectionsData = await sectionsRes.json();
 
-  const persistSections = useCallback(async (next) => {
-    setSections(next);
-    const ok = await saveShared(SECTIONS_KEY, next);
-    flashSave(ok);
+        setTargets(Array.isArray(targetsData) ? targetsData : []);
+        
+        // Map section objects from DB [{id: 1, name: "Est..."}, ...] to flat array of strings
+        if (Array.isArray(sectionsData) && sectionsData.length > 0) {
+          setSections(sectionsData.map(s => s.name));
+        } else {
+          setSections(DEFAULT_SECTIONS);
+        }
+      } catch (error) {
+        console.error("Failed to load data:", error);
+        flashSave(false);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [flashSave]);
 
-  const addTarget = (t) =>
-    persistTargets((list) => [{ ...t, id: uid() }, ...list]);
+  // ── Database Mutations ──────────────────────────────────────────────────
+  const addTarget = async (t) => {
+    try {
+      const res = await fetch(`${API_BASE}/targets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(t),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Drizzle insert returning() often returns an array, so we grab the first item
+        const newTarget = Array.isArray(data) ? data[0] : data; 
+        setTargets((list) => [newTarget, ...list]);
+        flashSave(true);
+      } else throw new Error("Failed to add");
+    } catch (e) {
+      flashSave(false);
+    }
+  };
 
-  const updateTarget = (id, patch) =>
-    persistTargets((list) =>
-      list.map((t) =>
-        t.id === id
-          ? { ...t, ...patch, updatedAt: new Date().toISOString() }
-          : t
-      )
+  const updateTarget = async (id, patch) => {
+    const updatedFields = { ...patch, updatedAt: new Date().toISOString() };
+    
+    // Optimistic update for UI feel
+    setTargets((list) =>
+      list.map((t) => (t.id === id ? { ...t, ...updatedFields } : t))
     );
 
-  const deleteTarget = (id) =>
-    persistTargets((list) => list.filter((t) => t.id !== id));
+    try {
+      const res = await fetch(`${API_BASE}/targets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedFields),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      flashSave(true);
+    } catch (e) {
+      flashSave(false);
+    }
+  };
 
-  // Visible set depending on role & filters
+  const deleteTarget = async (id) => {
+    // Optimistic update
+    setTargets((list) => list.filter((t) => t.id !== id));
+
+    try {
+      const res = await fetch(`${API_BASE}/targets/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete");
+      flashSave(true);
+    } catch (e) {
+      flashSave(false);
+    }
+  };
+
+  const addSection = async (name) => {
+    try {
+      const res = await fetch(`${API_BASE}/sections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        setSections((prev) => [...prev, name]);
+        flashSave(true);
+      } else throw new Error("Failed to add section");
+    } catch (e) {
+      flashSave(false);
+    }
+  };
+
+  // ── Derived State & Rendering ───────────────────────────────────────────
   const visible = useMemo(() => {
     let v = targets;
     if (role === "officer" && officerSection)
@@ -141,7 +179,6 @@ export default function App() {
     return v;
   }, [targets, role, officerSection, filterSection, filterStatus]);
 
-  // Stats over the current role scope (before status filter)
   const scope = useMemo(() => {
     if (role === "officer" && officerSection)
       return targets.filter((t) => t.section === officerSection);
@@ -154,7 +191,7 @@ export default function App() {
     const s = { total: scope.length, Completed: 0, "In Progress": 0, "Not Started": 0, Overdue: 0 };
     scope.forEach((t) => {
       if (isOverdue(t)) s.Overdue++;
-      s[t.status]++;
+      if (s[t.status] !== undefined) s[t.status]++;
     });
     return s;
   }, [scope]);
@@ -293,7 +330,7 @@ export default function App() {
               <AddTarget
                 sections={sections}
                 onAdd={(t) => { addTarget(t); setShowAdd(false); }}
-                onAddSection={(name) => persistSections([...sections, name])}
+                onAddSection={addSection}
               />
             )}
 
@@ -330,7 +367,7 @@ export default function App() {
 
       <footer className="mx-auto px-5 py-6" style={{ maxWidth: 1080 }}>
         <p style={{ fontSize: 11.5, color: C.slate, borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
-          Pilot register. Data is shared across everyone who opens this tool and persists between sessions.
+          Live register. Data is synced with the central database and persists between sessions.
           For department-wide rollout with officer logins, host through OCAC.
         </p>
       </footer>
@@ -397,18 +434,22 @@ function AddTarget({ sections, onAdd, onAddSection }) {
   const [priority, setPriority] = useState("Medium");
   const [newSection, setNewSection] = useState("");
 
+  // Ensure default section selects accurately if data arrives late
+  useEffect(() => {
+    if (sections.length && !section) setSection(sections[0]);
+  }, [sections, section]);
+
   const submit = () => {
     if (!title.trim()) return;
     onAdd({
       title: title.trim(),
       detail: detail.trim(),
       section,
-      deadline,
+      deadline: deadline || null, // Allow empty deadline
       priority,
       status: "Not Started",
       remarks: "",
-      assignedDate: todayISO(),
-      updatedAt: new Date().toISOString(),
+      assignedDate: todayISO()
     });
     setTitle(""); setDetail(""); setDeadline(""); setPriority("Medium");
   };
