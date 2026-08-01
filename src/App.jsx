@@ -38,6 +38,18 @@ const DEFAULT_SECTIONS = [
   "Legislation",
   "NSS Cell",
   "Scheme Implementation",
+  "Policy & Transformation Cell",
+  "GIA-I",
+  "GIA-II",
+  "GIA-IIB",
+  "GIA-III",
+  "GCET",
+  "GCENT",
+  "NCET",
+  "NCNE",
+  "NCNT",
+  "FA-cum-Additional Secretary",
+  "Unassigned",
 ];
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -63,6 +75,18 @@ export default function App() {
   "Legislation",
   "NSS Cell",
   "Scheme Implementation",
+  "Policy & Transformation Cell",
+  "GIA-I",
+  "GIA-II",
+  "GIA-IIB",
+  "GIA-III",
+  "GCET",
+  "GCENT",
+  "NCET",
+  "NCNE",
+  "NCNT",
+  "FA-cum-Additional Secretary",
+  "Unassigned",
 ];
   const [loading, setLoading] = useState(true);
   const [saveNote, setSaveNote] = useState("");
